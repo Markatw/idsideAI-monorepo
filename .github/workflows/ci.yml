@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-lint:
+    name: Backend Lint (Ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: idsideAI_FIXED
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Ruff only
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Ruff gate (E9, F821, B008)
+        run: |
+          ruff check --select E9,F821,B008 .
+
+  frontend-build:
+    name: Frontend Build (Vite)
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('frontend/package.json') != '' }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+                                 cache-dependency-path: frontend/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
