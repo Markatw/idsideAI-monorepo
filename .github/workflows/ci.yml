@@ -77,13 +77,12 @@ jobs:
           fi
 
       - name: Collect backend artifacts (safe paths)
-        working-directory: .
         run: |
           mkdir -p ci_artifacts
-          [ -f idsideAI_FIXED/pip_freeze.txt ] && cp idsideAI_FIXED/pip_freeze.txt ci_artifacts/
-          [ -f repo_file_list.txt ] && mv repo_file_list.txt ci_artifacts/ || true
-          for f in idsideAI_FIXED/run.log idsideAI_FIXED/backend/run.log; do
-            [ -f "$f" ] && cp "$f" ci_artifacts/$(basename "$f")
+          [ -f pip_freeze.txt ] && cp pip_freeze.txt ci_artifacts/
+          [ -f repo_file_list.txt ] && cp repo_file_list.txt ci_artifacts/ || true
+          for f in run.log backend/run.log idsideAI_FIXED/run.log; do
+            [ -f "$f" ] && cp "$f" "ci_artifacts/$(basename "$f")"
           done
           ls -la ci_artifacts || true
 
