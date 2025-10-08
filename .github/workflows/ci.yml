@@ -93,6 +93,14 @@ jobs:
           path: ci_artifacts
           if-no-files-found: ignore
 
+
+      - name: Upload backend artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-ci-artifacts
+          path: ci_artifacts
+          if-no-files-found: ignore
+
   frontend:
     name: Frontend (Node)
     runs-on: ubuntu-latest
