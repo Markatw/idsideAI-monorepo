@@ -20,44 +20,16 @@ jobs:
         working-directory: idsideAI_FIXED
     steps:
       - uses: actions/checkout@v4
-
-      - name: Show context
-        run: |
-          echo "event: ${{ github.event_name }}"
-          echo "ref:   ${{ github.ref }}"
-          echo "sha:   ${{ github.sha }}"
-          ls -la
-          git ls-files | sed -n '1,200p' > ../repo_file_list.txt || true
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('idsideAI_FIXED/requirements*.txt', 'idsideAI_FIXED/pyproject.toml', 'idsideAI_FIXED/poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Create CI constraints (uvicorn fix)
-        run: |
-          cat > ci-constraints.txt <<'TXT'
-          uvicorn==0.30.6
-          TXT
-          cat ci-constraints.txt
-
-      - name: Install backend dependencies (soft)
+      - name: Install dependencies (soft)
         run: |
           python -m pip install -U pip || true
           if [ -f requirements.txt ]; then
+            printf "uvicorn==0.30.6\n" > ci-constraints.txt
             pip install -r requirements.txt -c ci-constraints.txt || true
-          elif [ -f pyproject.toml ]; then
-            pip install build || true
-            pip install . -c ci-constraints.txt || true
-          else
-            echo "No requirements.txt or pyproject.toml in idsideAI_FIXED; skipping deps."
           fi
           pip install ruff mypy bandit pytest || true
           pip freeze > pip_freeze.txt || true
@@ -76,64 +48,45 @@ jobs:
             echo "No tests found; skipping pytest."
           fi
 
-      - name: Collect backend artifacts (safe)
-        run: |
-            mkdir -p ci_artifacts
-            [ -f pip_freeze.txt ] && cp pip_freeze.txt ci_artifacts/
-            [ -f repo_file_list.txt ] && cp repo_file_list.txt ci_artifacts/ || true
-            for f in run.log backend/run.log idsideAI_FIXED/run.log; do
-              [ -f "$f" ] && cp "$f" "ci_artifacts/$(basename "$f")"
-            done
-            ls -la ci_artifacts || true
-
       - name: Upload backend artifacts
         uses: actions/upload-artifact@v4
         with:
           name: backend-ci-artifacts
-          path: ci_artifacts
-          if-no-files-found: ignore
-
-
-      - name: Upload backend artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-ci-artifacts
-          path: ci_artifacts
+          path: idsideAI_FIXED/pip_freeze.txt
           if-no-files-found: ignore
 
   frontend:
     name: Frontend (Node)
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('idsideAI_FIXED/**/package.json') != '' }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Detect frontend directory
-        id: find_frontend
-        shell: bash
-        run: |
-          if [ -f idsideAI_FIXED/frontend/package.json ]; then
-            echo "dir=idsideAI_FIXED/frontend" >> "$GITHUB_OUTPUT"
-          else
-            DIR=$(git ls-files | grep -E '^idsideAI_FIXED/.*/package.json$' | grep -v node_modules | head -n1 | xargs dirname)
-            echo "dir=${DIR:-idsideAI_FIXED}" >> "$GITHUB_OUTPUT"
-          fi
-          echo "Selected dir: $(cat $GITHUB_OUTPUT)"
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Cache npm
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles(steps.find_frontend.outputs.dir + '/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-
+      - name: Detect frontend directory
+        id: detect
+        shell: bash
+        run: |
+          set -e
+          if [ -f idsideAI_FIXED/frontend/package.json ]; then
+            echo "dir=idsideAI_FIXED/frontend" >> "$GITHUB_OUTPUT"
+            echo "havepkg=true" >> "$GITHUB_OUTPUT"
+          else
+            DIR=$(git ls-files | grep -E '^idsideAI_FIXED/.*/package.json$' | grep -v node_modules | head -n1 | xargs dirname || true)
+            if [ -n "$DIR" ] && [ -f "$DIR/package.json" ]; then
+              echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+              echo "havepkg=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "dir=idsideAI_FIXED" >> "$GITHUB_OUTPUT"
+              echo "havepkg=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          echo "Selected dir: $(grep '^dir=' $GITHUB_OUTPUT | cut -d= -f2)"
 
       - name: Install deps (soft)
-        working-directory: ${{ steps.find_frontend.outputs.dir }}
+        if: ${{ steps.detect.outputs.havepkg == 'true' }}
+        working-directory: ${{ steps.detect.outputs.dir }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci || true
@@ -142,7 +95,8 @@ jobs:
           fi
 
       - name: Build (soft)
-        working-directory: ${{ steps.find_frontend.outputs.dir }}
+        if: ${{ steps.detect.outputs.havepkg == 'true' }}
+        working-directory: ${{ steps.detect.outputs.dir }}
         run: |
           if npm run | grep -qE '^  build'; then
             npm run build || true
@@ -151,11 +105,11 @@ jobs:
           fi
 
       - name: Upload build artifacts (if any)
-        if: always()
+        if: ${{ always() && steps.detect.outputs.havepkg == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build
           path: |
-            ${{ steps.find_frontend.outputs.dir }}/dist
-            ${{ steps.find_frontend.outputs.dir }}/build
+            ${{ steps.detect.outputs.dir }}/dist
+            ${{ steps.detect.outputs.dir }}/build
           if-no-files-found: ignore
