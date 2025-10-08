@@ -87,6 +87,7 @@ async def whoami(request: Request):
     tenant, workspace = inject_tenant_headers(request)
     return {"auth": bool(payload), "claims": payload or {}, "tenant": tenant, "workspace": workspace}
 # ---- debug: list all registered routes (safe) ----
+
 from fastapi import APIRouter
 _debug_router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -94,13 +95,15 @@ _debug_router = APIRouter(prefix="/metrics", tags=["metrics"])
 def _debug_routes():
     return [{"path": r.path, "name": r.name, "methods": list(getattr(r, "methods", []))} for r in app.router.routes]
 
-if os.getenv("APP_ENV", "dev") != "prod":
+if os.getenv('APP_ENV','dev') != 'prod':
     app.include_router(_debug_router)
+#     app.include_router(_debug_router)
 #     app.include_router(_debug_router)
 
 # ----------------------------------------------------------------------
 # 🧭 Debug Router — lists all registered FastAPI routes
 # ----------------------------------------------------------------------
+
 from fastapi import APIRouter
 _debug_router = APIRouter()
 
@@ -116,8 +119,9 @@ def _debug_routes():
         for route in app.router.routes
     ]
 
-if os.getenv("APP_ENV", "dev") != "prod":
+if os.getenv('APP_ENV','dev') != 'prod':
     app.include_router(_debug_router)
+#     app.include_router(_debug_router)
 #     app.include_router(_debug_router)
 
 # normalized include for billing
@@ -132,6 +136,11 @@ if os.getenv("APP_ENV", "dev") != "prod":
 # normalized include for graphs
 # app.include_router(graphs_router)
 
-if os.getenv("APP_ENV", "dev") != "prod":
+if os.getenv('APP_ENV','dev') != 'prod':
     app.include_router(_debug_router)
+#     app.include_router(_debug_router)
 
+
+if os.getenv('APP_ENV','dev') != 'prod':
+    app.include_router(_debug_router)
+    app.include_router(_debug_router)
