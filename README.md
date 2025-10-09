@@ -3,3 +3,4 @@
 [![CI](https://github.com/Markatw/idsideAI-monorepo/actions/workflows/ci.yml/badge.svg)](https://github.com/Markatw/idsideAI-monorepo/actions/workflows/ci.yml)
 
 Trigger: frontend clean run milestone recorded.
+Trigger CI via PR
