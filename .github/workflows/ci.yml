@@ -1,5 +1,4 @@
 name: CI (stabilise)
-
 on:
   push:
     branches: ['**']
@@ -11,6 +10,7 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+jobs:
   backend:
     name: Backend (Python)
     runs-on: ubuntu-latest
@@ -24,102 +24,34 @@ concurrency:
         with:
           python-version: '3.12'
 
-      - name: Install minimal deps (strict)
+      # Strict install: deps + your package so "idsideai" imports
+      - name: Install deps (strict)
         run: |
           set -e
           python -m pip install -U pip setuptools wheel
-          # Ensure TestClient exists even if not in your requirements
-          pip install fastapi httpx
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install fastapi
+          fi
+          pip install -e .
 
-      - name: Debug import path
+      # In-process health check (no ports, no pytest, no heredoc)
+      - name: Healthz via TestClient (strict)
         env:
           PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
-        run: |
-          set -e
-          python - <<'PY'
-import sys, os, pkgutil, pathlib
-print("python:", sys.version)
-print("cwd:", os.getcwd())
-print("first sys.path entries:", sys.path[:3])
-print("fastapi installed?", bool(pkgutil.find_loader("fastapi")))
-print("idsideai importable?", bool(pkgutil.find_loader("idsideai")))
-print("tree (top-level):", [p.name for p in pathlib.Path('.').iterdir()][:20])
-PY
-
-      # STRICT: in-process health check that *locates* your FastAPI app automatically
-      - name: Healthz via TestClient (strict, robust)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
-        run: |
-          set -e
-          python - <<'PY'
-import sys, os, importlib, runpy, traceback
-from pathlib import Path
-
-BASE = Path.cwd()
-sys.path.insert(0, str(BASE))  # allow "from idsideai.main import app"
-
-def locate_app():
-    # 1) Try package import first
-    try:
-        mod = importlib.import_module("idsideai.main")
-        app = getattr(mod, "app", None)
-        if app is not None:
-            return app, "idsideai.main"
-    except Exception as e:
-        print("package import failed:", e)
-
-    # 2) Try common file locations
-    for rel in ["idsideai/main.py", "backend/app.py", "app.py", "main.py"]:
-        p = BASE / rel
-        if p.exists():
-            try:
-                g = runpy.run_path(str(p))
-                app = g.get("app")
-                if app is not None:
-                    return app, str(p)
-            except Exception as e:
-                print(f"load {p} failed:", e)
-
-    # 3) Last resort: scan for main/app with a FastAPI app object
-    for p in BASE.rglob("*.py"):
-        if any(skip in p.parts for skip in (".git", "node_modules", "__pycache__")):
-            continue
-        if p.name in ("main.py", "app.py"):
-            try:
-                g = runpy.run_path(str(p))
-                app = g.get("app")
-                if app is not None:
-                    return app, str(p)
-            except Exception as e:
-                print(f"scan load {p} failed:", e)
-
-    raise RuntimeError("Could not locate a FastAPI 'app' object.")
-
-try:
-    app, where = locate_app()
-    print("Using app from:", where)
-    from fastapi.testclient import TestClient
-    c = TestClient(app)
-    r = c.get("/healthz")
-    print("status:", r.status_code)
-    print("body:", r.text)
-    ok = (r.status_code == 200 and "ok" in r.text.lower())
-    with open("healthz.txt", "w") as f:
-        f.write(r.text)
-    sys.exit(0 if ok else 1)
-except Exception as e:
-    print("ERROR:", e)
-    traceback.print_exc()
-    sys.exit(1)
-PY
+        run: >
+          python -c "from fastapi.testclient import TestClient; import importlib,sys;
+          m=importlib.import_module('idsideai.main'); app=getattr(m,'app');
+          c=TestClient(app); r=c.get('/healthz'); print('status',r.status_code,'body',r.text);
+          sys.exit(0 if (r.status_code==200 and 'ok' in r.text.lower()) else 1)"
 
       - name: Upload backend artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-ci-artifacts
-          path: idsideAI_FIXED/healthz.txt
+          path: idsideAI_FIXED/requirements.txt
           if-no-files-found: ignore
 
 
