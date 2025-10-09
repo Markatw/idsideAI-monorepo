@@ -5,62 +5,19 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  healthz:
-    name: Backend healthz smoke
-    runs-on: ubuntu-latest
-    defaults:
-      run:
+  workflow_  workflow_  workflow_  workflow_  wo Backend healthz smoke
+    runs-on    runs-on    runs-on    runs-on   run:
         working-directory: idsideAI_FIXED
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install backend deps (STRICT)
-        run: |
-          set -e
-          python -m pip install -U pip setuptools wheel
-          # pin uvicorn for compat (even though we won't run a server here)
-          echo "uvicorn==0.30.6" > ci-constraints.txt
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt -c ci-constraints.txt
-          else
-            pip install fastapi uvicorn==0.30.6
-          fi
-          # install your project so 'idsideai' is importable
-          pip install -e .
-          # quick visibility
-          python - <<'PY'
-import sys, pkgutil
-print("python", sys.version)
-print("fastapi?", bool(pkgutil.find_loader("fastapi")))
-print("idsideai?", bool(pkgutil.find_loader("idsideai")))
-PY
-
-      - name: Healthz via TestClient (STRICT)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
-        run: |
-          set -e
-          python - <<'PY'
-from fastapi.testclient import TestClient
-from idsideai.main import app
-c = TestClient(app)
-r = c.get("/healthz")
-print("status:", r.status_code)
-print("body:", r.text)
-assert r.status_code == 200, f"bad status {r.status_code}"
-assert "ok" in r.text.lower(), "missing 'ok' in body"
+      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setupimport Test      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5      - uses: actions/setup-python@v5   nt("body:", r.text)
+assert r.status_code == 200, f"bad status {r.statassert r.status_codk" in r.text.lower(), "missing 'ok' in body"
 open("healthz.txt","w").write(r.text)
 PY
 
-      - name: Upload health      - name: Upload health      -      uses: actions/upload-artifact@v4
+      - name: Upload healthz artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: backend-healthz
-          path: idsideAI_FIXED/healthz.txt
-          if-no-files-found: warn
+                                                      f-no-files-found: warn
