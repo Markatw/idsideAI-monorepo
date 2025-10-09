@@ -1,0 +1,72 @@
+name: Healthz smoke
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  healthz:
+    name: Backend healthz smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: idsideAI_FIXED
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend deps (soft)
+        run: |
+          python -m pip install -U pip || true
+          if [ -f requirements.txt ]; then
+            printf "uvicorn==0.30.6\n" > ci-constraints.txt
+            pip install -r requirements.txt -c ci-constraints.txt || true
+          fi
+          pip install uvicorn || true
+
+      - name: Start server and check /healthz (robust)
+        run: |
+          set -e
+          # start uvicorn in background
+          pyth          pyth          pyth          pyth          pyth          pyth       &1           pythD=$!
+          echo "PID=$PID"
+          # wait up to ~20s for /healthz
+          ok=0
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:9009/healthz > healthz.txt; then
+              echo "healthz OK"
+              ok=1
+              break
+            fi
+            sleep 0.5
+          done
+          # stop server
+          kill $PID || true
+          sleep 1
+          # ensure we always have a file to inspect
+          if [ "$ok" -ne 1 ]; then
+            echo "NO RESPONSE FROM /healthz" > healthz.txt
+            echo "uvicorn log (tail):"
+            tail -n 200 uvicorn.log || true
+            cat healthz.txt
+            exit 1
+          fi
+          # show body and assert 'ok'
+          cat healthz.txt
+          grep -qi "ok" healthz.txt
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-healthz
+          path: |
+            idsideAI_FIXED/healthz.txt
+            idsideAI_FIXED/uvicorn.log
+          if-no-files-found: warn
