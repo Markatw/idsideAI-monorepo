@@ -3,3 +3,27 @@
 # IDE (PyCharm/IntelliJ)
 .idea/
 *.iml
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+*.log
+
+# SQLite / local data
+*.db
+
+# Node (frontend)
+idsideAI_FIXED/frontend/node_modules/
+idsideAI_FIXED/frontend/dist/
+idsideAI_FIXED/frontend/.env.local
+
+# OS/editor
+.DS_Store
+
+# Local snapshots
+*.zip
+*.zip.sha256
+
+# Accidental nested copy
+idsideAI_FIXED/idsideAI_FIXED/
