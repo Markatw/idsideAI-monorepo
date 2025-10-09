@@ -52,6 +52,18 @@ jobs:
       - name: Bandit (non-blocking)
         run: bandit -q -r . || true
 
+              # Ensure PYTHONPATH points to the app folder for imports
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=${GITHUB_WORKSPACE}/idsideAI_FIXED" >> $GITHUB_ENV
+
+      # Fix missing package markers (create __init__.py so Python sees packages)
+      - name: Package sanity (idsideAI_FIXED)
+        working-directory: idsideAI_FIXED
+        run: |
+          mkdir -p backend/middleware
+          [ -f backend/__init__.py ] || printf '' > backend/__init__.py
+          [ -f backend/middleware/__init__.py ] || printf '' > backend/middleware/__init__.py
+
       - name: Tests (run in idsideAI_FIXED)
         working-directory: idsideAI_FIXED
         env:
