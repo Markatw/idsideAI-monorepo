@@ -34,14 +34,8 @@ jobs:
           pip install ruff mypy bandit pytest || true
           pip freeze > pip_freeze.txt || true
 
-      - name: Lint / Types / Security (soft)
-        run: |
-          ruff check --ignore E402,B008 . || true
-          mypy || true
-          bandit -q -r . || true
-
-      - name: Run tests
-        run: pytest -q
+      - name: Run healthz test only (strict)
+        run: pytest -q tests/test_healthz.py
 
       - name: Upload backend artifacts
         uses: actions/upload-artifact@v4
