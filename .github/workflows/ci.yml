@@ -94,6 +94,28 @@ jobs:
             npm install || true
           fi
 
+      - name: Smoke healthz (start server and curl)
+        run: |
+          # working-directory is idsideAI_FIXED (set at job defaults)
+          python -m uvicorn idsideai.main:app --host 127.0.0.1 --port 9009 &
+          PID=$!
+          # wait up to ~10s for the server
+          for i in {1..20}; do
+            sleep 0.5
+            if curl -fsS http://127.0.0.1:9009/healthz > healthz.txt; then
+              echo "healthz OK"
+              break
+            fi
+          done
+          kill $PID || true
+
+      - name: Upload healthz response
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-healthz
+          path: idsideAI_FIXED/healthz.txt
+          if-no-files-found: ignore
+
       - name: Build (soft)
         if: ${{ steps.detect.outputs.havepkg == 'true' }}
         working-directory: ${{ steps.detect.outputs.dir }}
