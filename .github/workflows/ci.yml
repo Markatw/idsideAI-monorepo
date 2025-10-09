@@ -24,25 +24,21 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies (soft)
+      - name: Install deps (strict)
         run: |
-          python -m pip install -U pip || true
+          set -e
+          python -m pip install -U pip setuptools wheel
           if [ -f requirements.txt ]; then
-            printf "uvicorn==0.30.6\n" > ci-constraints.txt
-            pip install -r requirements.txt -c ci-constraints.txt || true
+            pip install -r requirements.txt
+          else
+            pip install fastapi
           fi
-          pip install ruff mypy bandit pytest || true
-          pip freeze > pip_freeze.txt || true
+          # install your package so 'idsideai' imports reliably
+          pip install -e .
 
-      - name: Run healthz test only (strict)
-        run: pytest -q tests/test_healthz.py
-
-      - name: Upload backend artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-ci-artifacts
-          path: idsideAI_FIXED/pip_freeze.txt
-          if-no-files-found: ignore
+      # STRICT: in-process health check (no ports, no pytest)
+      - name: Healthz via TestClient (strict)
+        run: PYTHONPATH=. python -c "from fastapi.testclient import TestClient; from idsideai.main import app; c=TestClient(app); r=c.get('/healthz'); print('status', r.status_code, 'body', r.text); import sys; sys.exit(0 if (r.status_code==200 and 'ok' in r.text.lower()) else 1)"
 
   frontend:
     name: Frontend (Node)
