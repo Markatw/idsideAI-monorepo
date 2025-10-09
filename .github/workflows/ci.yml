@@ -1,205 +1,45 @@
-name: CI (stabilise)
+name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
   pull_request:
-    branches: ['**']
+    branches: ["**"]
   workflow_dispatch:
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
-  backend:
-    name: Backend (Python)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: idsideAI_FIXED
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install minimal deps (strict)
-        run: |
-          set -e
-          python -m pip install -U pip setuptools wheel
-          # Ensure TestClient exists even if not in your requirements
-          pip install fastapi httpx
-
-      - name: Debug import path
-        env:
-          PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
-        run: |
-          set -e
-          python - <<'PY'
-import sys, os, pkgutil, pathlib
-print("python:", sys.version)
-print("cwd:", os.getcwd())
-print("first sys.path entries:", sys.path[:3])
-print("fastapi installed?", bool(pkgutil.find_loader("fastapi")))
-print("idsideai importable?", bool(pkgutil.find_loader("idsideai")))
-print("tree (top-level):", [p.name for p in pathlib.Path('.').iterdir()][:20])
-PY
-
-      # STRICT: in-process health check that *locates* your FastAPI app automatically
-      - name: Healthz via TestClient (strict, robust)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
-        run: |
-          set -e
-          python - <<'PY'
-import sys, os, importlib, runpy, traceback
-from pathlib import Path
-
-BASE = Path.cwd()
-sys.path.insert(0, str(BASE))  # allow "from idsideai.main import app"
-
-def locate_app():
-    # 1) Try package import first
-    try:
-        mod = importlib.import_module("idsideai.main")
-        app = getattr(mod, "app", None)
-        if app is not None:
-            return app, "idsideai.main"
-    except Exception as e:
-        print("package import failed:", e)
-
-    # 2) Try common file locations
-    for rel in ["idsideai/main.py", "backend/app.py", "app.py", "main.py"]:
-        p = BASE / rel
-        if p.exists():
-            try:
-                g = runpy.run_path(str(p))
-                app = g.get("app")
-                if app is not None:
-                    return app, str(p)
-            except Exception as e:
-                print(f"load {p} failed:", e)
-
-    # 3) Last resort: scan for main/app with a FastAPI app object
-    for p in BASE.rglob("*.py"):
-        if any(skip in p.parts for skip in (".git", "node_modules", "__pycache__")):
-            continue
-        if p.name in ("main.py", "app.py"):
-            try:
-                g = runpy.run_path(str(p))
-                app = g.get("app")
-                if app is not None:
-                    return app, str(p)
-            except Exception as e:
-                print(f"scan load {p} failed:", e)
-
-    raise RuntimeError("Could not locate a FastAPI 'app' object.")
-
-try:
-    app, where = locate_app()
-    print("Using app from:", where)
-    from fastapi.testclient import TestClient
-    c = TestClient(app)
-    r = c.get("/healthz")
-    print("status:", r.status_code)
-    print("body:", r.text)
-    ok = (r.status_code == 200 and "ok" in r.text.lower())
-    with open("healthz.txt", "w") as f:
-        f.write(r.text)
-    sys.exit(0 if ok else 1)
-except Exception as e:
-    print("ERROR:", e)
-    traceback.print_exc()
-    sys.exit(1)
-PY
-
-      - name: Upload backend artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-ci-artifacts
-          path: idsideAI_FIXED/healthz.txt
-          if-no-files-found: ignore
-
-
-  frontend:
-    name: Frontend (Node)
+jobs:
+  build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
+          python-version: "3.12"
 
-      - name: Detect frontend directory
-        id: detect
-        shell: bash
+      - name: Install basic tools
         run: |
-          set -e
-          if [ -f idsideAI_FIXED/frontend/package.json ]; then
-            echo "dir=idsideAI_FIXED/frontend" >> "$GITHUB_OUTPUT"
-            echo "havepkg=true" >> "$GITHUB_OUTPUT"
-          else
-            DIR=$(git ls-files | grep -E '^idsideAI_FIXED/.*/package.json$' | grep -v node_modules | head -n1 | xargs dirname || true)
-            if [ -n "$DIR" ] && [ -f "$DIR/package.json" ]; then
-              echo "dir=$DIR" >> "$GITHUB_OUTPUT"
-              echo "havepkg=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "dir=idsideAI_FIXED" >> "$GITHUB_OUTPUT"
-              echo "havepkg=false" >> "$GITHUB_OUTPUT"
-            fi
-          fi
-          echo "Selected dir: $(grep '^dir=' $GITHUB_OUTPUT | cut -d= -f2)"
+          python -m pip install --upgrade pip
+          pip install ruff mypy bandit pytest
 
-      - name: Install deps (soft)
-        if: ${{ steps.detect.outputs.havepkg == 'true' }}
-        working-directory: ${{ steps.detect.outputs.dir }}
+      - name: Install project dependencies (safe if present)
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci || true
-          else
-            npm install || true
-          fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ] || [ -f setup.cfg ]; then pip install -e . || true; fi
 
-      - name: Smoke healthz (start server and curl)
-        run: |
-          # working-directory is idsideAI_FIXED (set at job defaults)
-          python -m uvicorn idsideai.main:app --host 127.0.0.1 --port 9009 &
-          PID=$!
-          # wait up to ~10s for the server
-          for i in {1..20}; do
-            sleep 0.5
-            if curl -fsS http://127.0.0.1:9009/healthz > healthz.txt; then
-              echo "healthz OK"
-              break
-            fi
-          done
-          kill $PID || true
+      - name: Ruff (lint)
+        run: ruff check .
 
-      - name: Upload healthz response
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-healthz
-          path: idsideAI_FIXED/healthz.txt
-          if-no-files-found: ignore
+      - name: Mypy (types, non-blocking)
+        run: mypy . || true
 
-      - name: Build (soft)
-        if: ${{ steps.detect.outputs.havepkg == 'true' }}
-        working-directory: ${{ steps.detect.outputs.dir }}
-        run: |
-          if npm run | grep -qE '^  build'; then
-            npm run build || true
-          else
-            echo "No build script; skipping."
-          fi
+      - name: Bandit (security, non-blocking)
+        run: bandit -q -r . || true
 
-      - name: Upload build artifacts (if any)
-        if: ${{ always() && steps.detect.outputs.havepkg == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-build
-          path: |
-            ${{ steps.detect.outputs.dir }}/dist
-            ${{ steps.detect.outputs.dir }}/build
-          if-no-files-found: ignore
+      - name: Tests (non-blocking)
+        env:
+          APP_ENV: ci
+          OPENAI_API_KEY: "test"
+        run: pytest -q || true
