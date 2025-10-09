@@ -1,4 +1,4 @@
-name: Healthz smoke
+name: Healthz smoke (in-process)
 
 on:
   push:
@@ -25,58 +25,42 @@ jobs:
         run: |
           set -e
           python -m pip install -U pip setuptools wheel
-          # Pin uvicorn to avoid known incompatibilities
+          # pin uvicorn for compat (even though we won't run a server here)
           echo "uvicorn==0.30.6" > ci-constraints.txt
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt -c ci-constraints.txt
           else
             pip install fastapi uvicorn==0.30.6
           fi
-          # install your app so 'idsideai' is importable
+          # install your project so 'idsideai' is importable
           pip install -e .
           # quick visibility
-          python -c "import sys,idsideai; print('PYTHONPATH:', sys.path[:3]); print('idside          peai.__file__)"
-          pip list | egrep -i 'fastapi|starlette|uvicorn' || true
+          python - <<'PY'
+import sys, pkgutil
+print("python", sys.version)
+print("fastapi?", bool(pkgutil.find_loader("fastapi")))
+print("idsideai?", bool(pkgutil.find_loader("idsideai")))
+PY
 
-      - name: Start server and check /healthz (robust)
+      - name: Healthz via TestClient (STRICT)
         env:
           PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
         run: |
           set -e
-          # start   icorn in background and capture logs
-          python -m uvicorn idsideai.main:app --host 127.0.0.1 --port 9009 > uvicorn.log 2>&1 &
-          PID=$!
-          echo "PID=$PID"
-          ok=0
-          # wait up to ~20s for /healthz
-          for i in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:9009/healthz > healthz.txt; then
-              echo "healthz OK"
-              ok=1
-              break
-            fi
-            sleep 0.5
-          done
-          # stop server either way
-          kill $PID || true
-          sleep 1
-          # ensure artifacts exist and fail clearly if not OK
-          if [ "$ok" -ne 1 ]; then
-            echo "NO RESPONSE FROM /healthz" > healthz.txt
-            echo "---- uvicorn.log (tail) ----"
-            tail -n 200 uvicorn.log || true
-            exit 1
-          fi
-          echo "---- healthz.txt ----"
-          cat healthz.txt
-          grep -qi "ok" healthz.txt
+          python - <<'PY'
+from fastapi.testclient import TestClient
+from idsideai.main import app
+c = TestClient(app)
+r = c.get("/healthz")
+print("status:", r.status_code)
+print("body:", r.text)
+assert r.status_code == 200, f"bad status {r.status_code}"
+assert "ok" in r.text.lower(), "missing 'ok' in body"
+open("healthz.txt","w").write(r.text)
+PY
 
-      - name: Upload smoke artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload health      - name: Upload health      -      uses: actions/upload-artifact@v4
         with:
           name: backend-healthz
-          path: |
-            idsideAI_FIXED/healthz.txt
-            idsideAI_FIXED/uvicorn.log
+          path: idsideAI_FIXED/healthz.txt
           if-no-files-found: warn
