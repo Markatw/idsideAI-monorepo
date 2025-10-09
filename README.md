@@ -4,3 +4,4 @@
 
 Trigger: frontend clean run milestone recorded.
 Trigger CI via PR
+trigger healthz smoke Thu Oct  9 13:50:55 BST 2025
