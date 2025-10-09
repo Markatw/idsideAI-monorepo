@@ -111,8 +111,6 @@ jobs:
 
       - name: CI stub for backend.router_autoinclude (if missing)
         working-directory: idsideAI_FIXED
-      - name: CI stub for backend.router_autoinclude (if missing)
-        working-directory: idsideAI_FIXED
         run: |
           if [ ! -f backend/router_autoinclude.py ]; then
             printf '%s\n' \
