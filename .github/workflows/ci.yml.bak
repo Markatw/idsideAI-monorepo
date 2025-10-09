@@ -1,0 +1,122 @@
+name: CI (stabilise)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: idsideAI_FIXED
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps (safe)
+        run: |
+          set -e
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt || true
+          fi
+          # ensure TestClient works even if not pinned in reqs
+          pip install fastapi httpx || true
+
+      - name: Debug import path
+        env:
+        env:
+ Debug import pthu Debug impo }}/id Debug import pthu Debug impo         set -e
+          python - <<'PY'
+import sys, pkgutil
+print("python:", sys.version)
+print("cwd ok; first sys.path entries:", sys.path[:3])
+print("fastapiprintool(pkgutil.findprint("fasastapi")))
+print("idsideai?", bool(pkgutil.find_loader("idsideprint("idsideai?", bool(pkgin-process health check (no ports, no curl, no pytest)
+      - name: Healthz via TestClient (strict)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
+        run: |
+          python - <<'PY'
+import sys, traceback
+try:
+    from fastapi.testclient import TestClient
+    from idsideai.main import app
+    c = TestClient(app)
+    r = c.get("/healthz")
+    print("status:", r.status_code)
+    print("body:", r.text)
+    ok = (r.status_code == 200 and "ok" in r.text.lower())
+    open("healthz.    opw").write(r.text)
+    sys.exit(0 if ok else 1)
+except Exception as e:
+    print("ERROR:", e)
+    traceback.print_exc()
+    sys.exit(1)
+PY
+
+      -       -   ad backend artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-ci-artifacts
+          path: idsideAI_FIXED/healthz.txt
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Detect frontend directory
+        id: detect
+        shell: bash
+        run: |
+          if [ -f idsideAI_FIXED/frontend/package.json ]; then
+            echo "dir=idsideAI_FIXED/frontend" >> "$GITHUB_OUTPUT"
+            echo "havepkg=true" >> "$GITHUB_OUTPUT"
+          else
+            DIR=$(git ls-files | grep -E '^idsideAI_FIXED/.*/package.json$' | grep -v node_modules | head -n1 | xargs dirname || true)
+            if [ -n "$DIR" ] && [ -f "$DIR/package.json" ]; then
+              echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+              echo "havepkg=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "dir=idsideAI_FIXED" >> "$GITHUB_OUTPUT"
+              echo "havepkg=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Install deps (soft)
+        if: ${{ steps.detect.outputs.havepkg == 'true' }}
+        working-directory: ${{ steps.detect.outputs.dir }}
+        run: |
+          if [ -f package-lock.json ]; then npm ci || true; else npm install || true; fi
+
+      - name: Build (soft)
+        if: ${{ steps.detect.outputs.havepkg == 'true' }}
+        working-directory: ${{ steps.detect.outputs.dir }}
+        run: |
+          if npm run | grep -qE '^  build'; then npm run build || true; else echo "No build script; skipping."; fi
+
+      - name: Upload build artifacts
+        if: ${{ always() && steps.detect.outputs.havepkg == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+                                                               { steps.detect.outputs.dir }}/dist
+            ${{ steps.detect.outputs.dir }}/build
+          if-no-files-found: ignore
