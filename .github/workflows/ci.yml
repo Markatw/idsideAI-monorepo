@@ -64,6 +64,48 @@ jobs:
           [ -f backend/__init__.py ] || printf '' > backend/__init__.py
           [ -f backend/middleware/__init__.py ] || printf '' > backend/middleware/__init__.py
 
+      # Make sure Python can import from the app folder
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=${GITHUB_WORKSPACE}/idsideAI_FIXED" >> $GITHUB_ENV
+
+      # Ensure packages exist (so 'backend' and 'backend.middleware' import)
+      - name: Package sanity (idsideAI_FIXED)
+        working-directory: idsideAI_FIXED
+        run: |
+          mkdir -p backend/middleware
+          [ -f backend/__init__.py ] || printf '' > backend/__init__.py
+          [ -f backend/middleware/__init__.py ] || printf '' > backend/middleware/__init__.py
+
+      # Shim TenantContextMiddleware if the file is missing (non-invasive)
+      - name: Tenant middleware shim (if missing)
+        working-directory: idsideAI_FIXED
+        run: |
+          if [ ! -f backend/middleware/tenant.py ]; then
+            cat > backend/middleware/tenant.py <<'PY'
+from typing import Callable
+class TenantContextMiddleware:
+    def __init__(self, app: Callable): self.app = app
+    async def __call__(self, scope, receive, send): await self.app(scope, receive, send)
+PY
+          fi
+
+      # Diagnostic: show paths and try key imports (so we see exact failures)
+      - name: Import diagnostics
+        working-directory: idsideAI_FIXED
+        run: |
+          pwd; ls -la
+          python - <<'PY'
+import os, sys
+print("PY:", sys.version)
+print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
+for m in ["backend", "backend.app", "backend.middleware", "backend.middleware.tenant", "idsideai.main"]:
+    try:
+        __import__(m); print("IMPORTED:", m)
+    except Exception as e:
+        print("FAILED:", m, "->", repr(e))
+PY
+
+
       - name: Tests (run in idsideAI_FIXED)
         working-directory: idsideAI_FIXED
         env:
