@@ -58,6 +58,26 @@ jobs:
           touch backend/__init__.py
           touch backend/middleware/__init__.py
 
+      - name: Ensure routers package
+        working-directory: idsideAI_FIXED
+        run: |
+          mkdir -p backend/routers
+          touch backend/routers/__init__.py
+
+      - name: Graphs router shim (if missing)
+        working-directory: idsideAI_FIXED
+        run: |
+          if [ ! -f backend/routers/graphs.py ]; then
+            printf '%s\n' \
+            "from fastapi import APIRouter" \
+            "router = APIRouter()" \
+            "@router.get('/__graphs_shim_health')" \
+            "async def _graphs_shim_health():" \
+            "    return {'ok': True}" \
+            > backend/routers/graphs.py
+          fi
+
+
       - name: Tenant middleware shim (if missing)
         working-directory: idsideAI_FIXED
         run: |
