@@ -59,6 +59,21 @@ from pathlib import Path
 BASE = Path.cwd()
 sys.path.insert(0, str(BASE))  # allow "from idsideai.main import app"
 
+      - name: Install deps (strict)
+        run: |
+          set -e
+          python -m pip install -U pip setuptools wheel
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install fastapi
+          fi
+          pip install -e .
+
+      - name: Healthz via TestClient (strict)
+        run: python ci_healthz.py
+
+
 def locate_app():
     # 1) Try package import first
     try:
