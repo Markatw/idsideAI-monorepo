@@ -19,27 +19,44 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install basic tools
+      - name: Install tools
         run: |
           python -m pip install --upgrade pip
           pip install ruff mypy bandit pytest
 
-      - name: Install project dependencies (safe if present)
+      # Try root requirements first (safe if not present)
+      - name: Install root requirements (if any)
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # Install the app’s requirements from the subfolder (your tests live here)
+      - name: Install app requirements (idsideAI_FIXED)
+        working-directory: idsideAI_FIXED
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Failsafe: ensure core libs are available even if not pinned
+          pip install fastapi uvicorn httpx pydantic || true
+
+      # If the package is installable (pyproject.toml or setup.cfg), install it in editable mode
+      - name: Install app package (editable, if defined)
+        working-directory: idsideAI_FIXED
+        run: |
           if [ -f pyproject.toml ] || [ -f setup.cfg ]; then pip install -e . || true; fi
 
       - name: Ruff (non-blocking)
         run: ruff check . || true
 
-      - name: Mypy (types, non-blocking)
+      - name: Mypy (non-blocking)
         run: mypy . || true
 
-      - name: Bandit (security, non-blocking)
+      - name: Bandit (non-blocking)
         run: bandit -q -r . || true
 
-      - name: Tests
+      - name: Tests (run in idsideAI_FIXED)
+        working-directory: idsideAI_FIXED
         env:
           APP_ENV: ci
           OPENAI_API_KEY: "test"
+          PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
         run: pytest -q
+
