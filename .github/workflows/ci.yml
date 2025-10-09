@@ -24,24 +24,54 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies (soft)
+      - name: Install deps (safe)
         run: |
-          python -m pip install -U pip || true
+          set -e
+          python -m pip install -U pip
           if [ -f requirements.txt ]; then
-            printf "uvicorn==0.30.6\n" > ci-constraints.txt
-            pip install -r requirements.txt -c ci-constraints.txt || true
+            pip install -r requirements.txt || true
           fi
-          pip install ruff mypy bandit pytest || true
-          pip freeze > pip_freeze.txt || true
+          # ensure TestClient works even if not pinned in reqs
+          pip install fastapi httpx || true
 
-      - name: Run healthz test only (strict)
-        run: pytest -q tests/test_healthz.py
+      - name: Debug import path
+        env:
+        env:
+ Debug import pthu Debug impo }}/id Debug import pthu Debug impo         set -e
+          python - <<'PY'
+import sys, pkgutil
+print("python:", sys.version)
+print("cwd ok; first sys.path entries:", sys.path[:3])
+print("fastapiprintool(pkgutil.findprint("fasastapi")))
+print("idsideai?", bool(pkgutil.find_loader("idsideprint("idsideai?", bool(pkgin-process health check (no ports, no curl, no pytest)
+      - name: Healthz via TestClient (strict)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
+        run: |
+          python - <<'PY'
+import sys, traceback
+try:
+    from fastapi.testclient import TestClient
+    from idsideai.main import app
+    c = TestClient(app)
+    r = c.get("/healthz")
+    print("status:", r.status_code)
+    print("body:", r.text)
+    ok = (r.status_code == 200 and "ok" in r.text.lower())
+    open("healthz.    opw").write(r.text)
+    sys.exit(0 if ok else 1)
+except Exception as e:
+    print("ERROR:", e)
+    traceback.print_exc()
+    sys.exit(1)
+PY
 
-      - name: Upload backend artifacts
+      -       -   ad backend artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-ci-artifacts
-          path: idsideAI_FIXED/pip_freeze.txt
+          path: idsideAI_FIXED/healthz.txt
           if-no-files-found: ignore
 
   frontend:
@@ -57,7 +87,6 @@ jobs:
         id: detect
         shell: bash
         run: |
-          set -e
           if [ -f idsideAI_FIXED/frontend/package.json ]; then
             echo "dir=idsideAI_FIXED/frontend" >> "$GITHUB_OUTPUT"
             echo "havepkg=true" >> "$GITHUB_OUTPUT"
@@ -71,56 +100,23 @@ jobs:
               echo "havepkg=false" >> "$GITHUB_OUTPUT"
             fi
           fi
-          echo "Selected dir: $(grep '^dir=' $GITHUB_OUTPUT | cut -d= -f2)"
 
       - name: Install deps (soft)
         if: ${{ steps.detect.outputs.havepkg == 'true' }}
         working-directory: ${{ steps.detect.outputs.dir }}
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci || true
-          else
-            npm install || true
-          fi
-
-      - name: Smoke healthz (start server and curl)
-        run: |
-          # working-directory is idsideAI_FIXED (set at job defaults)
-          python -m uvicorn idsideai.main:app --host 127.0.0.1 --port 9009 &
-          PID=$!
-          # wait up to ~10s for the server
-          for i in {1..20}; do
-            sleep 0.5
-            if curl -fsS http://127.0.0.1:9009/healthz > healthz.txt; then
-              echo "healthz OK"
-              break
-            fi
-          done
-          kill $PID || true
-
-      - name: Upload healthz response
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-healthz
-          path: idsideAI_FIXED/healthz.txt
-          if-no-files-found: ignore
+          if [ -f package-lock.json ]; then npm ci || true; else npm install || true; fi
 
       - name: Build (soft)
         if: ${{ steps.detect.outputs.havepkg == 'true' }}
         working-directory: ${{ steps.detect.outputs.dir }}
         run: |
-          if npm run | grep -qE '^  build'; then
-            npm run build || true
-          else
-            echo "No build script; skipping."
-          fi
+          if npm run | grep -qE '^  build'; then npm run build || true; else echo "No build script; skipping."; fi
 
-      - name: Upload build artifacts (if any)
+      - name: Upload build artifacts
         if: ${{ always() && steps.detect.outputs.havepkg == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-build
-          path: |
-            ${{ steps.detect.outputs.dir }}/dist
+                                                               { steps.detect.outputs.dir }}/dist
             ${{ steps.detect.outputs.dir }}/build
           if-no-files-found: ignore
