@@ -34,15 +34,15 @@ jobs:
           pip install ruff mypy bandit pytest || true
           pip freeze > pip_freeze.txt || true
 
+      - name: Lint / Types / Security (soft)
+        run: |
+          ruff check --ignore E402,B008 . || true
+          mypy || true
+          bandit -q -r . || true
+
+      # ✅ STRICT health check: run only the healthz test
       - name: Run healthz test only (strict)
         run: pytest -q tests/test_healthz.py
-
-      - name: Upload backend artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-ci-artifacts
-          path: idsideAI_FIXED/pip_freeze.txt
-          if-no-files-found: ignore
 
   frontend:
     name: Frontend (Node)
