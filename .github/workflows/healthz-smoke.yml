@@ -21,23 +21,34 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install backend deps (soft)
-        run: |
-          python -m pip install -U pip || true
-          if [ -f requirements.txt ]; then
-            printf "uvicorn==0.30.6\n" > ci-constraints.txt
-            pip install -r requirements.txt -c ci-constraints.txt || true
-          fi
-          pip install uvicorn || true
-
-      - name: Start server and check /healthz (robust)
+      - name: Install backend deps (STRICT)
         run: |
           set -e
-          # start uvicorn in background
-          pyth          pyth          pyth          pyth          pyth          pyth       &1           pythD=$!
+          python -m pip install -U pip setuptools wheel
+          # Pin uvicorn to avoid known incompatibilities
+          echo "uvicorn==0.30.6" > ci-constraints.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt -c ci-constraints.txt
+          else
+            pip install fastapi uvicorn==0.30.6
+          fi
+          # install your app so 'idsideai' is importable
+          pip install -e .
+          # quick visibility
+          python -c "import sys,idsideai; print('PYTHONPATH:', sys.path[:3]); print('idside          peai.__file__)"
+          pip list | egrep -i 'fastapi|starlette|uvicorn' || true
+
+      - name: Start server and check /healthz (robust)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/idsideAI_FIXED
+        run: |
+          set -e
+          # start   icorn in background and capture logs
+          python -m uvicorn idsideai.main:app --host 127.0.0.1 --port 9009 > uvicorn.log 2>&1 &
+          PID=$!
           echo "PID=$PID"
-          # wait up to ~20s for /healthz
           ok=0
+          # wait up to ~20s for /healthz
           for i in $(seq 1 40); do
             if curl -fsS http://127.0.0.1:9009/healthz > healthz.txt; then
               echo "healthz OK"
@@ -46,18 +57,17 @@ jobs:
             fi
             sleep 0.5
           done
-          # stop server
+          # stop server either way
           kill $PID || true
           sleep 1
-          # ensure we always have a file to inspect
+          # ensure artifacts exist and fail clearly if not OK
           if [ "$ok" -ne 1 ]; then
             echo "NO RESPONSE FROM /healthz" > healthz.txt
-            echo "uvicorn log (tail):"
+            echo "---- uvicorn.log (tail) ----"
             tail -n 200 uvicorn.log || true
-            cat healthz.txt
             exit 1
           fi
-          # show body and assert 'ok'
+          echo "---- healthz.txt ----"
           cat healthz.txt
           grep -qi "ok" healthz.txt
 
