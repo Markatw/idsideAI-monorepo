@@ -1,0 +1,5 @@
+name: demo
+steps:
+  - id: s1
+    type: prompt
+    prompt: "{missing}"

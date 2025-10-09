@@ -1,0 +1,303 @@
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry, ProcessCollector, PlatformCollector
+import redis
+import psycopg
+import time
+from typing import Dict
+import os
+import logging, uuid
+from fastapi import FastAPI, Request
+from fastapi.openapi.docs import get_swagger_ui_html
+from idsideai.http import shutdown as http_shutdown
+from idsideai.settings import settings
+from neo4j import GraphDatabase
+import json, sys
+import hashlib
+from fastapi.responses import PlainTextResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import Response
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from dotenv import load_dotenv
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from idsideai.routers import decision_models, telemetry
+from security_toolkit.security_utils import wire_security
+from security_toolkit.hardening import wire_security_full
+
+load_dotenv()
+app = FastAPI(openapi_tags=[{'name':'telemetry','description':'Health & metrics'},{'name':'decision-models','description':'Run decision models'}], docs_url=None, openapi_version="3.0.3", title="idsideAI - Decision Layer")
+app = wire_security_full(app)  # security headers + optional rate limiting
+
+from pathlib import Path
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = BASE_DIR / "ui" / "templates"
+STATIC_DIR = BASE_DIR / "ui" / "static"
+TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.include_router(decision_models.router)
+app.include_router(telemetry.router)
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+from time import monotonic
+APP_START_MONO = monotonic()
+class TelemetryResponse(BaseModel):
+    uptime: float
+    version: str
+
+@app.get("/telemetry", response_model=TelemetryResponse, summary="Get Telemetry")
+async def get_telemetry():
+    return {"uptime": round(monotonic() - APP_START_MONO, 3), "version": "0.1.0"}
+
+
+# --- Security & CORS ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ALLOW_ORIGINS.split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    resp: Response = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    resp.headers["Permissions-Policy"] = "geolocation=()"
+    resp.headers["Content-Security-Policy"] = os.getenv(
+        "CSP",
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
+    )
+    return resp
+
+
+# --- Request ID + Global exception handler ---
+logger = logging.getLogger("idsideai")
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    req_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    request.state.request_id = req_id
+    response = await call_next(request)
+    response.headers["x-request-id"] = req_id
+    return response
+
+@app.exception_handler(Exception)
+async def unhandled_exc(request: Request, exc: Exception):
+    logger.exception("Unhandled error", extra={"request_id": getattr(request.state, "request_id", None)})
+    return JSONResponse({"detail": "Internal Server Error", "request_id": getattr(request.state, "request_id", None)}, status_code=500)
+
+
+# --- Optional rate limiting (SlowAPI) ---
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+    app.state.limiter = limiter
+    @app.middleware("http")
+    async def _ratelimit_mw(request: Request, call_next):
+        return await call_next(request)
+except Exception:
+    pass
+
+
+@app.get("/ready", summary="Readiness")
+async def ready():
+    checks = {}
+    checks["neo4j"] = await _check_neo4j()
+    checks["postgres"] = await _check_postgres()
+    checks["redis"] = await _check_redis()
+    req = _required_deps()
+    if req is None:
+        # default: require all configured deps
+        required = [name for name, info in checks.items() if info["configured"]]
+    else:
+        required = req
+    all_ok = all(checks.get(name, {"ok": False})["ok"] for name in required)
+    from fastapi import Response
+    status = 200 if all_ok else 503
+    return Response(
+        content=json.dumps({"ready": status == 200, "required": required, "checks": checks}),
+        status_code=status,
+        media_type="application/json"
+    )
+
+
+
+@app.get("/docs", include_in_schema=False)
+def custom_docs():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title="idsideAI - Decision Layer",
+        swagger_js_url=None,
+        swagger_css_url=None,
+        swagger_favicon_url="/static/img/favicon.svg",
+        swagger_ui_parameters={"defaultModelsExpandDepth": -1, "displayRequestDuration": True},
+        custom_css_url="/static/css/swagger-theme.css",
+    )
+
+
+MAX_BYTES = 2 * 1024 * 1024  # 2MB
+class BodyLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        cl = request.headers.get("content-length")
+        try:
+            if cl and int(cl) > MAX_BYTES:
+                return PlainTextResponse("Payload too large", status_code=413)
+        except ValueError:
+            return PlainTextResponse("Invalid content-length", status_code=400)
+        return await call_next(request)
+app.add_middleware(BodyLimitMiddleware)
+
+
+# JSON logging
+handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter('{"lvl":"%(levelname)s","msg":"%(message)s","ts":"%(asctime)s"}')
+handler.setFormatter(formatter)
+root_logger = logging.getLogger()
+root_logger.handlers = [handler]
+root_logger.setLevel(logging.INFO)
+
+
+class ErrorResponse(BaseModel):
+    detail: str
+
+
+@app.on_event("shutdown")
+async def _shutdown_event():
+    await http_shutdown()
+
+
+async def _check_neo4j() -> Dict[str, bool | str]:
+    uri = settings.NEO4J_URI
+    user = settings.NEO4J_USER
+    pwd = settings.NEO4J_PASSWORD
+    if not uri:
+        return {"configured": False, "ok": True, "detail": "NEO4J_URI not set; skipping"}
+    try:
+        driver = GraphDatabase.driver(uri, auth=(user or "", pwd or ""), max_connection_lifetime=60, connection_timeout=5)
+        with driver.session() as session:
+            res = session.run("RETURN 1 AS ok").single()
+            ok = bool(res and res["ok"] == 1)
+        driver.close()
+        return {"configured": True, "ok": ok, "detail": "connected" if ok else "query failed"}
+    except Exception as e:
+        return {"configured": True, "ok": False, "detail": str(e)}
+
+
+# --- Prometheus metrics ---
+METRICS_REGISTRY = CollectorRegistry()
+ProcessCollector(registry=METRICS_REGISTRY)
+PlatformCollector(registry=METRICS_REGISTRY)
+REQUEST_COUNTER = Counter("http_requests_total", "HTTP requests", ["path","method","status"], registry=METRICS_REGISTRY)
+APP_INFO = Gauge("app_info", "Application info", ["version","app"], registry=METRICS_REGISTRY)
+APP_INFO.labels(version="0.1.0", app="idsideAI").set(1)
+
+
+@app.middleware("http")
+async def metrics_middleware(request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    try:
+        REQUEST_COUNTER.labels(path=request.url.path, method=request.method, status=str(response.status_code)).inc()
+        REQUEST_LATENCY.labels(path=request.url.path, method=request.method).observe(time.time() - start)
+    except Exception:
+        pass
+    return response
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    data = generate_latest(METRICS_REGISTRY)
+    from fastapi import Response
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+async def _check_postgres() -> Dict[str, bool | str]:
+    dsn = settings.POSTGRES_URI
+    if not dsn:
+        return {"configured": False, "ok": True, "detail": "POSTGRES_URI not set; skipping"}
+    try:
+        with psycopg.connect(dsn, connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                row = cur.fetchone()
+                ok = bool(row and row[0] == 1)
+        return {"configured": True, "ok": ok, "detail": "connected" if ok else "query failed"}
+    except Exception as e:
+        return {"configured": True, "ok": False, "detail": str(e)}
+
+
+async def _check_redis() -> Dict[str, bool | str]:
+    url = settings.REDIS_URL
+    if not url:
+        return {"configured": False, "ok": True, "detail": "REDIS_URL not set; skipping"}
+    try:
+        r = redis.from_url(url, socket_connect_timeout=3)
+        ok = bool(r.ping())
+        return {"configured": True, "ok": ok, "detail": "connected" if ok else "ping failed"}
+    except Exception as e:
+        return {"configured": True, "ok": False, "detail": str(e)}
+
+
+# --- Sentry (optional) ---
+if os.getenv("SENTRY_DSN"):
+    try:
+        import sentry_sdk
+        sentry_sdk.init(dsn=os.getenv("SENTRY_DSN"), traces_sample_rate=0.1)
+    except Exception:
+        pass
+
+
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "Request latency",
+    ["path","method"],
+    registry=METRICS_REGISTRY,
+    buckets=[0.005,0.01,0.025,0.05,0.1,0.25,0.5,1.0,2.5,5.0,10.0]
+)
+
+
+def _required_deps():
+    raw = os.getenv("REQUIRED_DEPS", "").strip()
+    if not raw:
+        return None  # default: all configured deps are required
+    return [x.strip().lower() for x in raw.split(",") if x.strip()]
+
+
+# --- Health & Provider Status Endpoints (added) ---
+from typing import Dict, Any
+
+@app.get("/status")
+@limiter.limit("120/minute")
+async def status(request: Request) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "service": "idsideAI",
+        "neo4j": "connected",
+    }
+
+@app.get("/status/providers")
+@limiter.limit("60/minute")
+async def status_providers(request: Request) -> Dict[str, Any]:
+    # minimal placeholder; extend to check real providers if needed
+    return {
+        "providers": {
+            "openai": bool(bool(os.environ.get("OPENAI_API_KEY"))),
+            "neo4j": True
+        }
+    }
+

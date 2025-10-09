@@ -1,0 +1,29 @@
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from idsideai.routers import decision_models, telemetry
+from security_toolkit.security_utils import wire_security
+from security_toolkit.hardening import wire_security_full
+from dotenv import load_dotenv
+
+load_dotenv()
+app = FastAPI(
+    openapi_tags=[
+        {'name': 'telemetry', 'description': 'Health & metrics'},
+        {'name': 'decision-models', 'description': 'Run decision models'}
+    ],
+    docs_url='/docs',
+    openapi_version='3.0.3',
+    title='idsideAI - Decision Layer'
+)
+
+
+# --- health endpoint (auto) ---
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    return {"status": "ok"}
+
+from idsideai.routers import telemetry, decision_models
+
+# --- auto-wired routers ---
+app.include_router(telemetry.router)
+app.include_router(decision_models.router)

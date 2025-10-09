@@ -1,0 +1,4 @@
+{
+  "sdl_text": "name: demo\nsteps:\n  - id: s1\n    type: prompt\n    prompt: \"{missing}\"\n",
+  "inputs": {}
+}

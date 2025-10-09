@@ -1,0 +1,20 @@
+/* Branded Swagger UI Theme - idsideAI (two blues) */
+.swagger-ui .topbar { background: #fff; border-bottom: 1px solid #e5e7eb; }
+.swagger-ui .topbar-wrapper .link span { color: #0A66C2 !important; font-weight: 700; }
+.swagger-ui .btn { border-radius: 8px; }
+.swagger-ui .btn.execute { background: #0A66C2; border-color: #0A66C2; }
+.swagger-ui .btn.execute:hover { background: #136FE8; border-color: #136FE8; }
+.swagger-ui .opblock.opblock-get { border-color: #0A66C233; }
+.swagger-ui .opblock.opblock-post { border-color: #136FE833; }
+.swagger-ui .info .title { color: #0A66C2; }
+.swagger-ui .models-control {
+  color: #0A66C2; border-color: #0A66C266;
+}
+.swagger-ui .opblock-summary-method { background: #0A66C2; }
+.swagger-ui .opblock-summary {
+  border-left: 6px solid #0A66C2;
+}
+.swagger-ui .scheme-container { background: #fff; border: 1px solid #e5e7eb; }
+.swagger-ui .model-title, .swagger-ui .prop-title { color: #0f172a; }
+.swagger-ui a, .swagger-ui a:visited { color: #0A66C2; }
+.swagger-ui a:hover { color: #136FE8; }
