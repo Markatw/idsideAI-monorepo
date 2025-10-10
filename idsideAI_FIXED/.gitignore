@@ -2,3 +2,10 @@
 frontend/dist
 frontend/.vite
 .DS_Store
+# cleanup & build artifacts
+frontend/dist
+frontend/.vite
+../_frontend_unpack/
+backend/app.py.bak_*
+frontend__backup_*/
+qc/
