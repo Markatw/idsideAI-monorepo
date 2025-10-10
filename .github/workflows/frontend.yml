@@ -1,0 +1,58 @@
+name: Frontend (Node)
+
+on:
+  push:
+    branches: ["main", "release/*"]
+  pull_request:
+    branches: ["main", "release/*"]
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    name: Frontend (Node)
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"  # makes many CLIs run in non-interactive mode
+    defaults:
+      run:
+        working-directory: frontend   # <--- CHANGE this if your app isn't in ./frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"          # LTS
+          cache: "npm"
+          cache-dependency-path: |
+            frontend/package-lock.json
+            frontend/**/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Lint (non-blocking if not present)
+        run: npm run -s lint --if-present
+
+      - name: Unit tests (non-blocking if not present)
+        run: npm run -s test --if-present
+
+      - name: Build (non-blocking if not present)
+        run: npm run -s build --if-present
+
+      - name: Upload build artifact (optional)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: |
+            frontend/dist
+            frontend/build
+          if-no-files-found: ignore
