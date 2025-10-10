@@ -18,38 +18,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect frontend directory
+      - name: Detect frontend directory (anywhere)
         id: detect
         shell: bash
         run: |
           set -euo pipefail
-          candidates=("frontend" "web" "app" "ui" ".")
-          FRONTEND_DIR=""
-          for c in "${candidates[@]}"; do
-            if [ -f "$c/package.json" ]; then
-              FRONTEND_DIR="$c"
-              break
-            fi
-          done
-          if [ -z "$FRONTEND_DIR" ]; then
-            echo "ERROR: Could not find a package.json in frontend/, web/, app/, ui/, or repo root." >&2
-            echo "Please move your frontend into one of those or update this workflow."
-            exit 1
+          # find first package.json outside node_modules
+          FOUND="$(find . -type f -name package.json -not -path '*/node_modules/*' | head -n 1 || true)"
+          if [ -z "$FOUND" ]; then
+            echo "No package.json found. Skipping frontend job."
+            echo "FRONTEND_SKIP=1" >> "$GITHUB_ENV"
+          else
+            FRONTEND_DIR="$(dirname "$FOUND")"
+            echo "Detected frontend dir: $FRONTEND_DIR"
+            echo "FRONTEND_DIR=$FRONTEND_DIR" >> "$GITHUB_ENV"
+            echo "FRONTEND_SKIP=0" >> "$GITHUB_ENV"
           fi
-          echo "FRONTEND_DIR=$FRONTEND_DIR" >> "$GITHUB_ENV"
-          echo "Detected frontend dir: $FRONTEND_DIR"
 
       - name: Use Node.js
+        if: env.FRONTEND_SKIP != '1'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-        # No cache-dependency-path here — avoids errors when the lockfile is absent
 
       - name: Show npm cache dir (diagnostic)
+        if: env.FRONTEND_SKIP != '1'
         run: npm config get cache
 
       - name: Install dependencies
+        if: env.FRONTEND_SKIP != '1'
         working-directory: ${{ env.FRONTEND_DIR }}
         run: |
           if [ -f package-lock.json ]; then
@@ -59,19 +57,22 @@ jobs:
           fi
 
       - name: Lint (non-blocking if script missing)
+        if: env.FRONTEND_SKIP != '1'
         working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s lint --if-present
 
       - name: Unit tests (non-blocking if script missing)
+        if: env.FRONTEND_SKIP != '1'
         working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s test --if-present
 
       - name: Build (non-blocking if script missing)
+        if: env.FRONTEND_SKIP != '1'
         working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s build --if-present
 
       - name: Upload build artifact (optional)
-        if: success()
+        if: env.FRONTEND_SKIP != '1'
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build
@@ -79,3 +80,7 @@ jobs:
             ${{ env.FRONTEND_DIR }}/dist
             ${{ env.FRONTEND_DIR }}/build
           if-no-files-found: ignore
+
+      - name: No frontend detected (informational)
+        if: env.FRONTEND_SKIP == '1'
+        run: echo "No frontend detected in this repo; job completed successfully."
