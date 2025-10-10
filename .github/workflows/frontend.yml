@@ -12,25 +12,45 @@ jobs:
     name: Frontend (Node)
     runs-on: ubuntu-latest
     env:
-      CI: "true"  # makes many CLIs run in non-interactive mode
-    defaults:
-      run:
-        working-directory: frontend   # <--- CHANGE this if your app isn't in ./frontend
+      CI: "true"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect frontend directory
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidates=("frontend" "web" "app" "ui" ".")
+          FRONTEND_DIR=""
+          for c in "${candidates[@]}"; do
+            if [ -f "$c/package.json" ]; then
+              FRONTEND_DIR="$c"
+              break
+            fi
+          done
+          if [ -z "$FRONTEND_DIR" ]; then
+            echo "ERROR: Could not find a package.json in frontend/, web/, app/, ui/, or repo root." >&2
+            echo "Please move your frontend into one of those or update this workflow."
+            exit 1
+          fi
+          echo "FRONTEND_DIR=$FRONTEND_DIR" >> "$GITHUB_ENV"
+          echo "Detected frontend dir: $FRONTEND_DIR"
+
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"          # LTS
+          node-version: "20"
           cache: "npm"
-          cache-dependency-path: |
-            frontend/package-lock.json
-            frontend/**/package-lock.json
+        # No cache-dependency-path here — avoids errors when the lockfile is absent
+
+      - name: Show npm cache dir (diagnostic)
+        run: npm config get cache
 
       - name: Install dependencies
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: |
           if [ -f package-lock.json ]; then
             npm ci
@@ -38,13 +58,16 @@ jobs:
             npm install
           fi
 
-      - name: Lint (non-blocking if not present)
+      - name: Lint (non-blocking if script missing)
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s lint --if-present
 
-      - name: Unit tests (non-blocking if not present)
+      - name: Unit tests (non-blocking if script missing)
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s test --if-present
 
-      - name: Build (non-blocking if not present)
+      - name: Build (non-blocking if script missing)
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s build --if-present
 
       - name: Upload build artifact (optional)
@@ -53,6 +76,6 @@ jobs:
         with:
           name: frontend-build
           path: |
-            frontend/dist
-            frontend/build
+            ${{ env.FRONTEND_DIR }}/dist
+            ${{ env.FRONTEND_DIR }}/build
           if-no-files-found: ignore
