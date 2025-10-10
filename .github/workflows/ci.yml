@@ -141,6 +141,7 @@ jobs:
 
       # ---------- CI overlays: force minimal apps that expose exact test endpoints ----------
       - name: CI overlay backend.app (minimal test app)
+        if: env.CI_SMOKE_OVERLAY == '1'     # <-- add this line
         working-directory: idsideAI_FIXED
         run: |
           if [ -f backend/app.py ]; then mv backend/app.py backend/app._real.py; fi
@@ -158,6 +159,7 @@ jobs:
           > backend/app.py
 
       - name: CI overlay idsideai.main (minimal test app)
+        if: env.CI_SMOKE_OVERLAY == '1'     # <-- add this line
         working-directory: idsideAI_FIXED
         run: |
           if [ -f idsideai/main.py ]; then mv idsideai/main.py idsideai/main._real.py; fi
@@ -173,6 +175,7 @@ jobs:
             "    return {'plans': [{'id':'free','name':'Free','price':0.0}]}" \
             "app.include_router(router)" \
           > idsideai/main.py
+
       # -------------------------------------------------------------------------------------
 
       - name: Run smoke/health tests only
