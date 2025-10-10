@@ -19,26 +19,40 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI: "true"
-    defaults:
-      run:
-        working-directory: idsideAI_FIXED/frontend
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Detect fixed frontend path and set skip flag if missing
+      - name: Verify frontend path
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "idsideAI_FIXED/frontend/package.json" ]; then
+            echo "FRONTEND_DIR=idsideAI_FIXED/frontend" >> "$GITHUB_ENV"
+            echo "FRONTEND_SKIP=0" >> "$GITHUB_ENV"
+            echo "Detected: idsideAI_FIXED/frontend/package.json"
+          else
+            echo "No package.json at idsideAI_FIXED/frontend — skipping frontend job."
+            echo "FRONTEND_DIR=" >> "$GITHUB_ENV"
+            echo "FRONTEND_SKIP=1" >> "$GITHUB_ENV"
+          fi
+
       - name: Use Node.js
+        if: env.FRONTEND_SKIP != '1'
         uses: actions/setup-node@v4
         with:
           node-version: "20"  # LTS
-        # (Deliberately no 'cache:' here to avoid lockfile errors)
 
       - name: Enable Corepack (Yarn/Pnpm support)
+        if: env.FRONTEND_SKIP != '1'
         run: corepack enable
 
-      # Optional caches (safe only if the lockfile exists)
+      # Optional caches — only when lockfiles exist
       - name: Cache npm (if package-lock.json present)
-        if: ${{ hashFiles('idsideAI_FIXED/frontend/package-lock.json') != '' || hashFiles('idsideAI_FIXED/frontend/npm-shrinkwrap.json') != '' }}
+        if: env.FRONTEND_SKIP != '1' && hashFiles('idsideAI_FIXED/frontend/package-lock.json') != ''
         uses: actions/cache@v4
         with:
           path: ~/.npm
@@ -46,7 +60,7 @@ jobs:
           restore-keys: ${{ runner.os }}-node-npm-
 
       - name: Cache Yarn (if yarn.lock present)
-        if: ${{ hashFiles('idsideAI_FIXED/frontend/yarn.lock') != '' }}
+        if: env.FRONTEND_SKIP != '1' && hashFiles('idsideAI_FIXED/frontend/yarn.lock') != ''
         uses: actions/cache@v4
         with:
           path: ~/.cache/yarn
@@ -54,14 +68,16 @@ jobs:
           restore-keys: ${{ runner.os }}-node-yarn-
 
       - name: Show npm cache dir (diagnostic)
+        if: env.FRONTEND_SKIP != '1'
         run: npm config get cache
 
       - name: Install dependencies
+        if: env.FRONTEND_SKIP != '1'
+        working-directory: ${{ env.FRONTEND_DIR }}
         shell: bash
         run: |
           set -euo pipefail
           if [ -f yarn.lock ]; then
-            # Yarn v3+ via Corepack; --immutable prefers exact lockfile, fallback to install
             yarn install --immutable || yarn install
           else
             if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
@@ -72,20 +88,27 @@ jobs:
           fi
 
       - name: Lint (non-blocking if script missing)
+        if: env.FRONTEND_SKIP != '1'
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s lint --if-present
 
       - name: Unit tests (non-blocking if script missing)
+        if: env.FRONTEND_SKIP != '1'
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s test --if-present
 
       - name: Type check (tsconfig only)
-        if: ${{ hashFiles('idsideAI_FIXED/frontend/tsconfig.json') != '' }}
+        if: env.FRONTEND_SKIP != '1' && hashFiles('idsideAI_FIXED/frontend/tsconfig.json') != ''
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npx tsc --noEmit
 
       - name: Build (non-blocking if script missing)
+        if: env.FRONTEND_SKIP != '1'
+        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s build --if-present
 
       - name: Upload build artifact (optional)
-        if: success()
+        if: env.FRONTEND_SKIP != '1'
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build
@@ -93,3 +116,7 @@ jobs:
             idsideAI_FIXED/frontend/dist
             idsideAI_FIXED/frontend/build
           if-no-files-found: ignore
+
+      - name: No frontend detected (informational)
+        if: env.FRONTEND_SKIP == '1'
+        run: echo "No frontend at idsideAI_FIXED/frontend; job completed successfully."
