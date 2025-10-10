@@ -18,12 +18,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Find a package.json anywhere (ignores node_modules). If none, skip the job (green).
       - name: Detect frontend directory (anywhere)
         id: detect
         shell: bash
         run: |
           set -euo pipefail
-          # find first package.json outside node_modules
           FOUND="$(find . -type f -name package.json -not -path '*/node_modules/*' | head -n 1 || true)"
           if [ -z "$FOUND" ]; then
             echo "No package.json found. Skipping frontend job."
@@ -39,8 +39,44 @@ jobs:
         if: env.FRONTEND_SKIP != '1'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: "20"   # LTS
+
+      - name: Enable Corepack (Yarn/Pnpm)
+        if: env.FRONTEND_SKIP != '1'
+        run: corepack enable
+
+      # Determine package manager + lockfile (npm or yarn)
+      - name: Detect lockfile / package manager
+        if: env.FRONTEND_SKIP != '1'
+        working-directory: ${{ env.FRONTEND_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f yarn.lock ]; then
+            echo "PKG_MGR=yarn" >> "$GITHUB_ENV"
+            echo "LOCKFILE=yarn.lock" >> "$GITHUB_ENV"
+          elif [ -f package-lock.json ]; then
+            echo "PKG_MGR=npm" >> "$GITHUB_ENV"
+            echo "LOCKFILE=package-lock.json" >> "$GITHUB_ENV"
+          elif [ -f npm-shrinkwrap.json ]; then
+            echo "PKG_MGR=npm" >> "$GITHUB_ENV"
+            echo "LOCKFILE=npm-shrinkwrap.json" >> "$GITHUB_ENV"
+          else
+            echo "PKG_MGR=npm" >> "$GITHUB_ENV"
+            echo "LOCKFILE=" >> "$GITHUB_ENV"
+          fi
+          echo "Using package manager: ${PKG_MGR:-npm}, lockfile: ${LOCKFILE:-<none>}"
+
+      # Cache only if we actually have a lockfile
+      - name: Cache dependencies (if lockfile present)
+        if: env.FRONTEND_SKIP != '1' && env.LOCKFILE != ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/yarn
+          key: ${{ runner.os }}-node-${{ env.PKG_MGR }}-${{ hashFiles(format('{0}/{1}', env.FRONTEND_DIR, env.LOCKFILE)) }}
+          restore-keys: ${{ runner.os }}-node-${{ env.PKG_MGR }}-
 
       - name: Show npm cache dir (diagnostic)
         if: env.FRONTEND_SKIP != '1'
@@ -49,11 +85,18 @@ jobs:
       - name: Install dependencies
         if: env.FRONTEND_SKIP != '1'
         working-directory: ${{ env.FRONTEND_DIR }}
+        shell: bash
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
+          set -euo pipefail
+          if [ "${PKG_MGR:-npm}" = "yarn" ]; then
+            # Yarn v3+ via corepack; --immutable if lockfile is consistent, fallback to install
+            yarn install --immutable || yarn install
           else
-            npm install
+            if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+              npm ci
+            else
+              npm install
+            fi
           fi
 
       - name: Lint (non-blocking if script missing)
@@ -83,4 +126,4 @@ jobs:
 
       - name: No frontend detected (informational)
         if: env.FRONTEND_SKIP == '1'
-        run: echo "No frontend detected in this repo; job completed successfully."
+        run: echo "No package.json detected in this repo; frontend job skipped successfully."
