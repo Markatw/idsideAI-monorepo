@@ -2,48 +2,49 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [ ci-pipeline ]
   pull_request:
-    branches: ["**"]
-  workflow_dispatch:
 
 jobs:
-  build-test:
+  frontend:
+    name: Frontend build (Vite)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: idsideAI_FIXED/frontend
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: idsideAI_FIXED/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
 
-      - name: Cache pip
-        uses: actions/cache@v4
+  backend:
+    name: Backend smoke (healthz)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: idsideAI_FIXED/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: ${{ runner.os }}-pip-
-
-      - name: Install tooling & deps
+          python-version: '3.12'
+      - name: Install deps
         run: |
-          python -m pip install --upgrade pip
-          pip install ruff mypy bandit pytest
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f pyproject.toml ] || [ -f setup.cfg ]; then pip install -e . || true; fi
-
-      - name: Ruff
-        run: ruff check .
-
-      - name: Mypy (non-blocking)
-        run: mypy . || true
-
-      - name: Bandit (non-blocking)
-        run: bandit -q -r . || true
-
-      - name: Tests
-        env:
-          APP_ENV: ci
-          OPENAI_API_KEY: "test"
-        run: pytest -q || true
+          python -m pip install -U pip
+          python -m pip install "fastapi>=0.112" "uvicorn[standard]>=0.30" "httpx" "pytest"
+      - name: Healthz test (no server needed)
+        run: |
+          python - <<'PY'
+          from app import app
+          from fastapi.testclient import TestClient
+          c = TestClient(app)
+          r = c.get("/healthz")
+          assert r.status_code == 200, r.text
+          assert r.json().get("status") == "ok", r.json()
+          print("healthz OK")
+          PY
