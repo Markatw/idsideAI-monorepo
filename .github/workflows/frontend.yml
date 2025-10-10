@@ -3,8 +3,14 @@ name: Frontend (Node)
 on:
   push:
     branches: ["main", "release/*"]
+    paths:
+      - "idsideAI_FIXED/frontend/**"
+      - ".github/workflows/frontend.yml"
   pull_request:
     branches: ["main", "release/*"]
+    paths:
+      - "idsideAI_FIXED/frontend/**"
+      - ".github/workflows/frontend.yml"
   workflow_dispatch:
 
 jobs:
@@ -13,83 +19,49 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI: "true"
+    defaults:
+      run:
+        working-directory: idsideAI_FIXED/frontend
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Find a package.json anywhere (ignores node_modules). If none, skip the job (green).
-      - name: Detect frontend directory (anywhere)
-        id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-          FOUND="$(find . -type f -name package.json -not -path '*/node_modules/*' | head -n 1 || true)"
-          if [ -z "$FOUND" ]; then
-            echo "No package.json found. Skipping frontend job."
-            echo "FRONTEND_SKIP=1" >> "$GITHUB_ENV"
-          else
-            FRONTEND_DIR="$(dirname "$FOUND")"
-            echo "Detected frontend dir: $FRONTEND_DIR"
-            echo "FRONTEND_DIR=$FRONTEND_DIR" >> "$GITHUB_ENV"
-            echo "FRONTEND_SKIP=0" >> "$GITHUB_ENV"
-          fi
-
       - name: Use Node.js
-        if: env.FRONTEND_SKIP != '1'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"   # LTS
+          node-version: "20"  # LTS
+        # (Deliberately no 'cache:' here to avoid lockfile errors)
 
-      - name: Enable Corepack (Yarn/Pnpm)
-        if: env.FRONTEND_SKIP != '1'
+      - name: Enable Corepack (Yarn/Pnpm support)
         run: corepack enable
 
-      # Determine package manager + lockfile (npm or yarn)
-      - name: Detect lockfile / package manager
-        if: env.FRONTEND_SKIP != '1'
-        working-directory: ${{ env.FRONTEND_DIR }}
+      # Optional caches (safe only if the lockfile exists)
+      - name: Cache npm (if package-lock.json present)
+        if: ${{ hashFiles('idsideAI_FIXED/frontend/package-lock.json') != '' || hashFiles('idsideAI_FIXED/frontend/npm-shrinkwrap.json') != '' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-npm-${{ hashFiles('idsideAI_FIXED/frontend/package-lock.json', 'idsideAI_FIXED/frontend/npm-shrinkwrap.json') }}
+          restore-keys: ${{ runner.os }}-node-npm-
+
+      - name: Cache Yarn (if yarn.lock present)
+        if: ${{ hashFiles('idsideAI_FIXED/frontend/yarn.lock') != '' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yarn
+          key: ${{ runner.os }}-node-yarn-${{ hashFiles('idsideAI_FIXED/frontend/yarn.lock') }}
+          restore-keys: ${{ runner.os }}-node-yarn-
+
+      - name: Show npm cache dir (diagnostic)
+        run: npm config get cache
+
+      - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
           if [ -f yarn.lock ]; then
-            echo "PKG_MGR=yarn" >> "$GITHUB_ENV"
-            echo "LOCKFILE=yarn.lock" >> "$GITHUB_ENV"
-          elif [ -f package-lock.json ]; then
-            echo "PKG_MGR=npm" >> "$GITHUB_ENV"
-            echo "LOCKFILE=package-lock.json" >> "$GITHUB_ENV"
-          elif [ -f npm-shrinkwrap.json ]; then
-            echo "PKG_MGR=npm" >> "$GITHUB_ENV"
-            echo "LOCKFILE=npm-shrinkwrap.json" >> "$GITHUB_ENV"
-          else
-            echo "PKG_MGR=npm" >> "$GITHUB_ENV"
-            echo "LOCKFILE=" >> "$GITHUB_ENV"
-          fi
-          echo "Using package manager: ${PKG_MGR:-npm}, lockfile: ${LOCKFILE:-<none>}"
-
-      # Cache only if we actually have a lockfile
-      - name: Cache dependencies (if lockfile present)
-        if: env.FRONTEND_SKIP != '1' && env.LOCKFILE != ''
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.npm
-            ~/.cache/yarn
-          key: ${{ runner.os }}-node-${{ env.PKG_MGR }}-${{ hashFiles(format('{0}/{1}', env.FRONTEND_DIR, env.LOCKFILE)) }}
-          restore-keys: ${{ runner.os }}-node-${{ env.PKG_MGR }}-
-
-      - name: Show npm cache dir (diagnostic)
-        if: env.FRONTEND_SKIP != '1'
-        run: npm config get cache
-
-      - name: Install dependencies
-        if: env.FRONTEND_SKIP != '1'
-        working-directory: ${{ env.FRONTEND_DIR }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${PKG_MGR:-npm}" = "yarn" ]; then
-            # Yarn v3+ via corepack; --immutable if lockfile is consistent, fallback to install
+            # Yarn v3+ via Corepack; --immutable prefers exact lockfile, fallback to install
             yarn install --immutable || yarn install
           else
             if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
@@ -100,30 +72,24 @@ jobs:
           fi
 
       - name: Lint (non-blocking if script missing)
-        if: env.FRONTEND_SKIP != '1'
-        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s lint --if-present
 
       - name: Unit tests (non-blocking if script missing)
-        if: env.FRONTEND_SKIP != '1'
-        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s test --if-present
 
+      - name: Type check (tsconfig only)
+        if: ${{ hashFiles('idsideAI_FIXED/frontend/tsconfig.json') != '' }}
+        run: npx tsc --noEmit
+
       - name: Build (non-blocking if script missing)
-        if: env.FRONTEND_SKIP != '1'
-        working-directory: ${{ env.FRONTEND_DIR }}
         run: npm run -s build --if-present
 
       - name: Upload build artifact (optional)
-        if: env.FRONTEND_SKIP != '1'
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build
           path: |
-            ${{ env.FRONTEND_DIR }}/dist
-            ${{ env.FRONTEND_DIR }}/build
+            idsideAI_FIXED/frontend/dist
+            idsideAI_FIXED/frontend/build
           if-no-files-found: ignore
-
-      - name: No frontend detected (informational)
-        if: env.FRONTEND_SKIP == '1'
-        run: echo "No package.json detected in this repo; frontend job skipped successfully."
