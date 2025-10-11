@@ -1,6 +1,14 @@
 from fastapi import FastAPI, APIRouter
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="idsideAI Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:5173","http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---- Tenant middleware (fallback-safe) ----
 try:
